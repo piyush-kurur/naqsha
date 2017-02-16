@@ -39,6 +39,7 @@ library
                  , Naqsha.Annotate.Feature
                  , Naqsha.Annotate.Attribute
                  , Naqsha.Language
+                 , Naqsha.OpenStreetMap.ID
   other-modules: Naqsha.Annotate.Internal
 
   default-language: Haskell2010
