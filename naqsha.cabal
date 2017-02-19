@@ -27,6 +27,8 @@ source-repository head
 library
   ghc-options: -Wall
   build-depends: base            >= 4.6  && < 4.10
+               , bytestring
+               , conduit
                , containers
                , data-default
                , groups
@@ -34,6 +36,8 @@ library
                , time
                , unordered-containers
                , vector          >= 0.7.1 && < 0.12
+               , xml-conduit
+               , xml-types
                , lens
 
   exposed-modules: Naqsha.Position
@@ -42,6 +46,7 @@ library
                  , Naqsha.Annotate.Attribute
                  , Naqsha.Language
                  , Naqsha.OpenStreetMap
+                 , Naqsha.OpenStreetMap.XML.Generate
   other-modules: Naqsha.OpenStreetMap.ID
                , Naqsha.OpenStreetMap.Element
                , Naqsha.Annotate.Internal
