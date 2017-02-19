@@ -15,7 +15,9 @@ import           Data.Word
 
 -------------------- Instance for OsmID --------------------------------------------
 
--- | The ID of an object in open street map.
+-- | The ID of an object in open street map. Currently, the Open
+-- Street map project uses 64-bit word for ids. We use the phantom
+-- type of the entity for better type safety.
 newtype OsmID element  = OsmID Word64 deriving (Eq, Ord, Enum)
 
 instance Show (OsmID element) where
