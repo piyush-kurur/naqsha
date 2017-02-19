@@ -116,6 +116,11 @@ osmMeta :: Lens' (Osm e) (OsmMeta e)
 {-# INLINE osmMeta #-}
 osmMeta = _osmMeta
 
+instance OsmElement e => OsmElement (Osm e) where
+  tags        = osmElement . tags
+  elementType = elementType . coerceID
+    where coerceID :: OsmID(Osm a) ->  OsmID a
+          coerceID (OsmID x) = OsmID x
 
 ---------------------------- The node element ----------------------------
 

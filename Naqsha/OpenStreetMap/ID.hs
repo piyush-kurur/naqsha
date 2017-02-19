@@ -4,7 +4,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 -- | Module capturing ID of elements in open Street Map.
 module Naqsha.OpenStreetMap.ID
-      ( OsmID
+      ( OsmID(..)
       ) where
 
 import           Control.Monad               ( liftM )
