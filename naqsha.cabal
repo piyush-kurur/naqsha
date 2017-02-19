@@ -41,10 +41,10 @@ library
                  , Naqsha.Annotate.Feature
                  , Naqsha.Annotate.Attribute
                  , Naqsha.Language
-                 , Naqsha.OpenStreetMap.ID
-                 , Naqsha.OpenStreetMap.Element
-  other-modules: Naqsha.Annotate.Internal
-
+                 , Naqsha.OpenStreetMap
+  other-modules: Naqsha.OpenStreetMap.ID
+               , Naqsha.OpenStreetMap.Element
+               , Naqsha.Annotate.Internal
   default-language: Haskell2010
 
 test-Suite test
