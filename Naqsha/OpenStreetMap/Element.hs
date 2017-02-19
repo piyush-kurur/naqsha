@@ -202,18 +202,18 @@ instance WayLike Way where
 data Member = forall a.  OsmElement a => Member (OsmID a) Text
 
 -- | A relation.
-data Relation = Relation { __relationMembers :: [Member]
+data Relation = Relation { __relationMembers :: Vector Member
                          , __relationTags    :: OsmTags
                          }
 
 
 instance Default Relation where
-  def = Relation [] HM.empty
+  def = Relation empty HM.empty
 
 makeLenses ''Relation
 
 -- | Lens to focus on the members of the relation.
-relationMembers :: Lens' Relation [Member]
+relationMembers :: Lens' Relation (Vector Member)
 {-# INLINE relationMembers #-}
 relationMembers = _relationMembers
 
