@@ -1,8 +1,9 @@
 {-# LANGUAGE OverloadedStrings    #-}
 
 -- | This module given conduit based streaming interface to generate a
--- XML encodings of the open street map elements and XML file
--- format. The supported version is 0.6.
+-- XML encodings of the open street map elements. It also provides
+-- combinators to build XML file format used for presenting collection
+-- of Open Street Map objects. The supported version is 0.6.
 --
 -- Schema: https://github.com/oschrenk/osm/blob/master/osm-io/src/main/resources/OSMSchema.xsd
 module Naqsha.OpenStreetMap.XML.Generate
@@ -13,13 +14,19 @@ module Naqsha.OpenStreetMap.XML.Generate
        -- ** Streaming with metadata
        , osmNode, osmWay, osmRelation
        , withNoTags
+       -- ** Rendering elements
+       , OsmXML(..)
+       , render, encode, pretty
        -- ** Helper function
        , xmlDoc
        , printEvents, prettyPrintEvents
        ) where
 
+
 import           Control.Lens
+import           Control.Monad.ST
 import qualified Data.ByteString          as BS
+import           Data.ByteString.Lazy        ( ByteString, fromChunks )
 import           Data.Conduit             as Conduit
 import           Data.Conduit.List        as Conduit
 import           Data.HashMap.Lazy        as HM
@@ -246,3 +253,50 @@ forEach :: Monad m
         -> Source m o
 forEach inpSrc srcFunc = inpSrc =$= bodyConduit
   where bodyConduit = awaitForever (toProducer . srcFunc)
+
+------------------------------ Stuff that can be converted to osm XML entries -------
+
+class OsmXML e where
+  toXMLSource      :: Monad m => e -> Source m Event
+  toXMLSourceAttrs :: Monad m => Attributes -> e -> Source m Event
+
+  toXMLSource        = toXMLSourceAttrs mempty
+
+  -- | Default action is to ignore the attributes.
+  toXMLSourceAttrs _ = toXMLSource
+
+instance OsmXML e => OsmXML (Osm e) where
+  toXMLSource oe = toXMLSourceAttrs (osmAttrs $ oe ^. osmMeta) $ oe ^. osmElement
+
+instance OsmXML Node where
+  toXMLSourceAttrs attrs n = nodeP attrs (n ^. nodePosition) (n ^. tags)
+
+
+instance OsmXML Way where
+  toXMLSourceAttrs attrs w = wayP attrs (w ^. tags) $ Conduit.yield (w ^. wayNodeIDs) =$= Conduit.concat
+
+instance OsmXML Relation where
+  toXMLSourceAttrs attrs r = relationP attrs (r ^. tags) $ Conduit.yield (r ^. relationMembers) =$= Conduit.concat
+
+{-
+
+instance OsmXML Node where
+  toXMLSource n = node (n ^. nodePosition) (n ^. tags)
+
+-}
+
+-- | Render an element as a lazy byte string (utf-8 encoding) given a settings.
+render :: OsmXML e
+       => RenderSettings      -- ^ setting used to render
+       -> e                   -- ^ element to render
+       -> ByteString
+render rSetting e = fromChunks $ runST $ sourceToList byteSrc
+  where byteSrc :: Source (ST s) BS.ByteString
+        byteSrc = toXMLSource e =$= renderBytes rSetting
+-- | Render the element efficiently i.e. with out wasting spaces.
+encode ::  OsmXML e => e -> ByteString
+encode = render def
+
+-- | Pretty print a given osm element.
+pretty :: OsmXML e => e -> ByteString
+pretty = render $ def { rsPretty = True }
