@@ -156,6 +156,16 @@ data OsmMeta a = OsmMeta { __osmID          :: OsmID a
 
 makeLenses ''OsmMeta
 
+instance Default (OsmMeta e) where
+  def = OsmMeta { __osmID          = undefined
+                , __modifiedUser   = undefined
+                , __modifiedUserID = undefined
+                , __isVisible      = undefined
+                , __version        = undefined
+                , __timeStamp      = undefined
+                , __changeSet      = undefined
+                }
+
 -- | Lens to focus on the osmID.
 osmID :: Lens' (OsmMeta e) (OsmID e)
 {-# INLINE osmID #-}
