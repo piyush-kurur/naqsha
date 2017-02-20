@@ -13,9 +13,9 @@ module Naqsha.OpenStreetMap.Element
 
        -- * Open Street Map elements.
        -- $osm$
-         Node, Way, Relation, Osm
+         OsmID, unsafeToOsmID
+       , Node, Way, Relation, Osm
        , Member(..)
-       , OsmID
        , OsmTags, OsmMeta, OsmElementType(..)
        -- ** Osm elements like types.
        , OsmElement(..), NodeLike(..), WayLike(..), RelationLike(..)
