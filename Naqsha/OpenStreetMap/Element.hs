@@ -16,7 +16,8 @@ module Naqsha.OpenStreetMap.Element
          OsmID, unsafeToOsmID
        , Node, Way, Relation, Osm
        , Member(..)
-       , OsmTags, OsmMeta, OsmElementType(..)
+       , OsmTags, OsmMeta, unsafeOsmMetaUndefined
+       , OsmElementType(..)
        -- ** Osm elements like types.
        , OsmElement(..), NodeLike(..), WayLike(..), RelationLike(..)
          -- ** Useful Lenses.
@@ -148,7 +149,7 @@ type OsmTags = HM.HashMap Text Text
 data OsmMeta a = OsmMeta { __osmID          :: OsmID a
                          , __modifiedUser   :: Text
                          , __modifiedUserID :: Integer
-                         , __isVisible        :: Bool
+                         , __isVisible      :: Bool
                          , __version        :: Integer
                          , __timeStamp      :: UTCTime
                          , __changeSet      :: Integer
@@ -156,15 +157,16 @@ data OsmMeta a = OsmMeta { __osmID          :: OsmID a
 
 makeLenses ''OsmMeta
 
-instance Default (OsmMeta e) where
-  def = OsmMeta { __osmID          = undefined
-                , __modifiedUser   = undefined
-                , __modifiedUserID = undefined
-                , __isVisible      = undefined
-                , __version        = undefined
-                , __timeStamp      = undefined
-                , __changeSet      = undefined
-                }
+-- |  OsmMeta with all fields set to undefined. Used in parsers.
+unsafeOsmMetaUndefined :: OsmMeta e
+unsafeOsmMetaUndefined = OsmMeta { __osmID          = undefined
+                                 , __modifiedUser   = undefined
+                                 , __modifiedUserID = undefined
+                                 , __isVisible      = undefined
+                                 , __version        = undefined
+                                 , __timeStamp      = undefined
+                                 , __changeSet      = undefined
+                                 }
 
 -- | Lens to focus on the osmID.
 osmID :: Lens' (OsmMeta e) (OsmID e)
