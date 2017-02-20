@@ -46,24 +46,41 @@ import Naqsha.Position
 
 -- $osm$
 --
--- Open street map describes the world using three kinds of elements,
--- nodes, ways, and relations captured by the types `Node`, `Way` and
--- `Relation` respectively. Each of these entities can be associated by
--- a set of tags that governs the semantics of the elements. They also
--- have an unique id that provides a unique reference to these
--- elements. The type @`OsmID` e@ captures the id of an element @e@.
+-- The Open street map describes the world using three kinds of
+-- elements given by the types `Node`, `Way` and `Relation`
+-- respectively. Intuitively, an element of type `Node` captures a
+-- location, a `Way` captures a path. Each of these entities can have
+-- additional sematic significance. For example a particular node
+-- might be a PoI, or a junction, or a bus stop. Similarly, a way
+-- could be a road or a boundary of a region. These semantic meaning
+-- is usually given in Open Street Map data base by associating a set
+-- of key-value pairs called tags. The type `OsmTags` captures such a mapping.
 --
--- The id of an element is just one of the meta information that the
--- Open Street Map database keeps track of. The type `OsmMeta`
--- captures these meta information. The entity @e@ tagged with a meta
--- information is captured by the type `Osm`.
 --
+-- = Element Identifiers and Meta information
+--
+-- Elements of type e in the data base are uniquely identified via
+-- their id's. The type @`OsmID` e@ captures these id's. While the OSM
+-- database currently uses 64-bit words as identifiers, the type
+-- @`OsmID` e@ should be seen as an opaque type and nothing should be
+-- assumed about them other than the fact that they are
+-- unique. Parameterising it by the type @e@ given some type safety on
+-- the Haskell side and helps in preventing confusion of ids of
+-- different types.
+--
+-- Besides the the ID, elements have some open street map specific
+-- meta data captured by the type `OsmMeta`.
 
 
 -- | The ID of an object in open street map. Currently, the Open
 -- Street map project uses 64-bit word for ids. We use the phantom
 -- type of the entity for better type safety.
-newtype OsmID element  = OsmID Word64 deriving (Eq, Ord, Enum)
+newtype OsmID element  = OsmID Word64 deriving (Eq, Ord)
+
+-- | Convert the word64 into an OsmID. Exposed only for internal
+-- modules not to be exported outside.
+unsafeToOsmID :: Word64 -> OsmID e
+unsafeToOsmID = OsmID
 
 instance Show (OsmID element) where
   show (OsmID x) = show x
@@ -138,8 +155,6 @@ data OsmMeta a = OsmMeta { __osmID          :: OsmID a
                          }
 
 makeLenses ''OsmMeta
-
-
 
 -- | Lens to focus on the osmID.
 osmID :: Lens' (OsmMeta e) (OsmID e)
