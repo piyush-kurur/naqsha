@@ -31,9 +31,8 @@ import           Data.Conduit             as Conduit
 import           Data.Conduit.List        as Conduit
 import           Data.HashMap.Lazy        as HM
 import           Data.Monoid
-import           Data.Version                ( Version(..), showVersion )
-import           Data.Time
-import           Data.Text                   ( Text, pack )
+import           Data.Version                ( showVersion )
+import           Data.Text                   ( pack )
 import           Data.Vector.Generic      as VG
 import           Data.XML.Types  hiding      ( Node )
 import           Text.XML.Stream.Render
@@ -58,7 +57,7 @@ osm :: Monad m
     -> Source m Event          -- ^ The stream of osm elements
     -> Source m Event
 osm (minLat, maxLat) (minLong, maxLong) bodyStream
-  = tag "osm" ats $ do tag "bounds" boundAttr mempty
+  = tag "osm" ats $ do onlyTag "bounds" boundAttr
                        bodyStream
 
   where ats = attr "xmlns" osmNameSpace
@@ -115,7 +114,7 @@ wayP :: Monad m
      -> Source m Event
 wayP extraAttrs ots idSrc = tag "way" extraAttrs bodySrc
   where nRSrc     = forEach idSrc mkND
-        mkND  oid = tag "nd" (attr "ref" $ showT oid) mempty
+        mkND  oid = onlyTag "nd" $ attr "ref" $ showT oid
         bodySrc   = osmTagsToSource ots <> nRSrc
 
 
@@ -166,14 +165,15 @@ osmRelation = relationP . osmAttrs
 osmMember :: Monad m
           => Member
           -> Source m Event
-osmMember (Member oid rl) = tag "member" attrs mempty
-  where attrs = attr "ref" (showT oid)
-                <> attr "type" ty
-                <> attr "role" rl
-        ty    = case elementType oid of
-                  NodeT     -> "node"
-                  WayT      -> "way"
-                  RelationT -> "relation"
+osmMember mem = onlyTag "member" attrs
+  where attrs = case mem of
+                  NodeM     oid rl -> refA oid <> roleA rl <> typeA "node"
+                  WayM      oid rl -> refA oid <> roleA rl <> typeA "way"
+                  RelationM oid rl -> refA oid <> roleA rl <> typeA "relation"
+        refA  :: OsmID e -> Attributes
+        refA  = attr "ref" . showT
+        typeA = attr "type"
+        roleA = attr "role"
 
 ------------------------- Helper function ----------------------
 
@@ -213,7 +213,7 @@ prettyPrintEvents = printEvents $ def { rsPretty = True }
 -- | Convert tags to a source of XML events.
 osmTagsToSource :: Monad m => OsmTags -> Source m Event
 osmTagsToSource = HM.foldrWithKey kvSource mempty
-    where kvSource k v = mappend $ tag "tag" (attr "k" k <> attr "v" v) mempty
+    where kvSource k v = mappend $ onlyTag "tag" $ attr "k" k <> attr "v" v
 
 osmAttrs :: OsmMeta e -> Attributes
 osmAttrs om = mconcat [ attr "id"        $ showT $ om    ^. osmID
@@ -232,6 +232,13 @@ forEach :: Monad m
         -> Source m o
 forEach inpSrc srcFunc = inpSrc =$= bodyConduit
   where bodyConduit = awaitForever (toProducer . srcFunc)
+
+-- | Tag with no body
+onlyTag :: Monad m
+        => Name
+        -> Attributes
+        -> Source m Event
+onlyTag n attrs = tag n attrs mempty
 
 ------------------------------ Stuff that can be converted to osm XML entries -------
 

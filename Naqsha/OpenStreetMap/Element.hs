@@ -17,7 +17,6 @@ module Naqsha.OpenStreetMap.Element
        , Node, Way, Relation, Osm
        , Member(..)
        , OsmTags, OsmMeta, unsafeOsmMetaUndefined
-       , OsmElementType(..)
        -- ** Osm elements like types.
        , OsmElement(..), NodeLike(..), WayLike(..), RelationLike(..)
          -- ** Useful Lenses.
@@ -200,21 +199,12 @@ timeStamp = _timeStamp
 changeSet :: Lens' (OsmMeta e) Integer
 changeSet = _changeSet
 
--- | There types of osm element.
-data OsmElementType = NodeT
-                    | WayT
-                    | RelationT deriving (Eq, Ord)
-
 ------------------------ OsmElement class -----------------------------
 
 -- | A class capturing OSM element type.
 class OsmElement e where
   -- | The tags for this element.
   tags       :: Lens' e OsmTags
-
-  -- | The type of the element.
-  elementType :: OsmID e -> OsmElementType
-
 
 -- | An element tagged with its Osm metadata.
 data Osm e = Osm { __osmElement :: e
@@ -235,9 +225,6 @@ osmMeta = _osmMeta
 
 instance OsmElement e => OsmElement (Osm e) where
   tags        = osmElement . tags
-  elementType = elementType . coerceID
-    where coerceID :: OsmID(Osm a) ->  OsmID a
-          coerceID (OsmID x) = OsmID x
 
 ---------------------------- The node element ----------------------------
 
@@ -260,7 +247,6 @@ instance Default Node where
 
 instance OsmElement Node where
   tags        = _nodeTags
-  elementType = const NodeT
 
 instance Location Node where
   geoPosition = __nodePosition
@@ -302,7 +288,6 @@ wayNodeIDs = _wayNodeIDs
 
 instance OsmElement Way where
   tags        = _wayTags
-  elementType = const WayT
 
 -- | Types that behave like OSM ways.
 class WayLike w where
@@ -316,7 +301,10 @@ instance WayLike Way where
 ---------------------- A relation --------------------------------------
 
 -- | A member of a relation.
-data Member = forall a.  OsmElement a => Member (OsmID a) Text
+
+data Member = NodeM     (OsmID Node)     Text
+            | WayM      (OsmID Way)      Text
+            | RelationM (OsmID Relation) Text
 
 -- | A relation.
 data Relation = Relation { __relationMembers :: V.Vector Member
@@ -337,7 +325,6 @@ relationMembers = _relationMembers
 
 instance OsmElement Relation where
   tags        = _relationTags
-  elementType = const RelationT
 
 -- | Types that behave like OSM relations.
 class RelationLike r where
