@@ -41,17 +41,7 @@ import           Text.XML.Stream.Render
 
 import Naqsha.Position
 import Naqsha.OpenStreetMap.Element
-
--- | The namespace in which the given Open Street Map elements reside.
-osmNameSpace :: Text
-osmNameSpace = "http://openstreetmap.org/osm/0.6"
-
--- | Current version.
-osmVersion :: Version
-osmVersion = Version [0,6] []
-
-osmGenerator :: Text
-osmGenerator = "CGImap 0.0.2"
+import Naqsha.OpenStreetMap.XML.Internal
 
 --------------- OsmFile ------------------------------------------------------
 
@@ -225,21 +215,9 @@ osmTagsToSource :: Monad m => OsmTags -> Source m Event
 osmTagsToSource = HM.foldrWithKey kvSource mempty
     where kvSource k v = mappend $ tag "tag" (attr "k" k <> attr "v" v) mempty
 
--- | Text version of show.
-showT :: Show a => a -> Text
-showT = pack . show
-
-
--- | Time format used by osm.
-osmTimeFmt :: String
-osmTimeFmt = "%Y-%m-%dT%T%Q%z"
-
-showTime :: FormatTime t => t -> Text
-showTime = pack . formatTime defaultTimeLocale osmTimeFmt
-
-
 osmAttrs :: OsmMeta e -> Attributes
-osmAttrs om = mconcat [ attr "user"      $ showT $ om    ^. modifiedUser
+osmAttrs om = mconcat [ attr "id"        $ showT $ om    ^. osmID
+                      , attr "user"      $ showT $ om    ^. modifiedUser
                       , attr "uid"       $ showT $ om    ^. modifiedUserID
                       , attr "timestamp" $ showTime $ om ^. timeStamp
                       , attr "version"   $ showT  $ om   ^. version
