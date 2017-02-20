@@ -34,11 +34,12 @@ import           Data.Monoid
 import           Data.Version                ( Version(..), showVersion )
 import           Data.Time
 import           Data.Text                   ( Text, pack )
+import           Data.Vector.Generic      as VG
 import           Data.XML.Types  hiding      ( Node )
 import           Text.XML.Stream.Render
 
+
 import Naqsha.Position
-import Naqsha.OpenStreetMap.ID
 import Naqsha.OpenStreetMap.Element
 
 -- | The namespace in which the given Open Street Map elements reside.
@@ -256,10 +257,34 @@ forEach inpSrc srcFunc = inpSrc =$= bodyConduit
 
 ------------------------------ Stuff that can be converted to osm XML entries -------
 
+-- | Osm types that have an xml representation. Minimum complete
+-- implementation is either one of `toXMLSource` or `toXMLSourceAttrs`.
+-- The default definitions of these members against each other is given as follows
+--
+-- >
+-- > toXMLSource        = toXMLSourceAttrs mempty
+-- > toXMLSourceAttrs _ = toXMLSource
+-- >
+--
+-- For elements which do not take any additional attributes, it is
+-- often easier to just define the member `toXMLSource`.
+--
 class OsmXML e where
-  toXMLSource      :: Monad m => e -> Source m Event
-  toXMLSourceAttrs :: Monad m => Attributes -> e -> Source m Event
 
+  -- | Convert the ement to a source of events.
+  toXMLSource      :: Monad m
+                   => e              -- ^ the element to convert
+                   -> Source m Event
+
+  -- | Convert the element to a source of events together with
+  -- additional attributes.
+  toXMLSourceAttrs :: Monad m
+                   => Attributes     -- ^ the additional attributes to add
+                   -> e              -- ^ the element to convert.
+                   -> Source m Event
+
+  -- | Default is to create XML source with empty additional
+  -- attributes.
   toXMLSource        = toXMLSourceAttrs mempty
 
   -- | Default action is to ignore the attributes.
@@ -273,17 +298,13 @@ instance OsmXML Node where
 
 
 instance OsmXML Way where
-  toXMLSourceAttrs attrs w = wayP attrs (w ^. tags) $ Conduit.yield (w ^. wayNodeIDs) =$= Conduit.concat
+  toXMLSourceAttrs attrs w = wayP attrs (w ^. tags) $ vectorToSrc $ w ^. wayNodeIDs
 
 instance OsmXML Relation where
-  toXMLSourceAttrs attrs r = relationP attrs (r ^. tags) $ Conduit.yield (r ^. relationMembers) =$= Conduit.concat
+  toXMLSourceAttrs attrs r = relationP attrs (r ^. tags) $ vectorToSrc $ r ^. relationMembers
 
-{-
-
-instance OsmXML Node where
-  toXMLSource n = node (n ^. nodePosition) (n ^. tags)
-
--}
+vectorToSrc :: (Vector v a, Monad m) => v a -> Source m a
+vectorToSrc v = Conduit.enumFromTo 0 (VG.length v - 1) =$= Conduit.mapM (unsafeIndexM v)
 
 -- | Render an element as a lazy byte string (utf-8 encoding) given a settings.
 render :: OsmXML e

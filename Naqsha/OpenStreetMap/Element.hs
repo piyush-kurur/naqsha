@@ -1,34 +1,124 @@
-{-# LANGUAGE TemplateHaskell           #-}
-{-# LANGUAGE OverloadedStrings         #-}
-{-# LANGUAGE ExistentialQuantification #-}
+{-# LANGUAGE CPP                        #-}
+{-# LANGUAGE ExistentialQuantification  #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE MultiParamTypeClasses      #-}
+{-# LANGUAGE OverloadedStrings          #-}
+{-# LANGUAGE TemplateHaskell            #-}
+{-# LANGUAGE TypeFamilies               #-}
+
 
 -- | The basic elements of open street map.
 module Naqsha.OpenStreetMap.Element
        (
 
        -- * Open Street Map elements.
-         Node, NodeLike(..), nodePosition
-       , Way,  WayLike(..), wayNodeIDs
-       , Relation, Member(..)
-       , RelationLike(..), relationMembers
-       -- ** Generic Osm elements.
-       , OsmElement(..), Osm, osmElement, osmMeta
-       , OsmElementType(..), OsmTags
-       -- ** Open Street map Meta information.
-       , OsmMeta
+       -- $osm$
+         Node, Way, Relation, Osm
+       , Member(..)
+       , OsmID
+       , OsmTags, OsmMeta, OsmElementType(..)
+       -- ** Osm elements like types.
+       , OsmElement(..), NodeLike(..), WayLike(..), RelationLike(..)
+         -- ** Useful Lenses.
+       , nodePosition, wayNodeIDs, relationMembers
+       , osmElement, osmMeta
+       -- *** Lenses for meta information.
        , osmID, modifiedUser, modifiedUserID, timeStamp, changeSet, version
        , isVisible
        ) where
 
+import           Control.Monad               ( liftM )
 import           Control.Lens
 import           Data.Default
 import qualified Data.HashMap.Lazy as HM
 import           Data.Text   hiding (empty)
 import           Data.Time
-import           Data.Vector
+import qualified Data.Vector                 as V
+import qualified Data.Vector.Generic         as GV
+import qualified Data.Vector.Generic.Mutable as GVM
+import           Data.Vector.Unboxed         as UV -- ( MVector(..), Vector, empty, Unbox)
 
-import Naqsha.OpenStreetMap.ID
+import           Data.Word
+
 import Naqsha.Position
+
+
+
+-- $osm$
+--
+-- Open street map describes the world using three kinds of elements,
+-- nodes, ways, and relations captured by the types `Node`, `Way` and
+-- `Relation` respectively. Each of these entities can be associated by
+-- a set of tags that governs the semantics of the elements. They also
+-- have an unique id that provides a unique reference to these
+-- elements. The type @`OsmID` e@ captures the id of an element @e@.
+--
+-- The id of an element is just one of the meta information that the
+-- Open Street Map database keeps track of. The type `OsmMeta`
+-- captures these meta information. The entity @e@ tagged with a meta
+-- information is captured by the type `Osm`.
+--
+
+
+-- | The ID of an object in open street map. Currently, the Open
+-- Street map project uses 64-bit word for ids. We use the phantom
+-- type of the entity for better type safety.
+newtype OsmID element  = OsmID Word64 deriving (Eq, Ord, Enum)
+
+instance Show (OsmID element) where
+  show (OsmID x) = show x
+
+instance UV.Unbox (OsmID element)
+
+newtype instance MVector s (OsmID element) = MOsmIDV  (MVector s Word64)
+newtype instance Vector    (OsmID element) = OsmIDV   (Vector Word64)
+
+instance GVM.MVector MVector (OsmID element) where
+  {-# INLINE basicLength #-}
+  {-# INLINE basicUnsafeSlice #-}
+  {-# INLINE basicOverlaps #-}
+  {-# INLINE basicUnsafeNew #-}
+  {-# INLINE basicUnsafeReplicate #-}
+  {-# INLINE basicUnsafeRead #-}
+  {-# INLINE basicUnsafeWrite #-}
+  {-# INLINE basicClear #-}
+  {-# INLINE basicSet #-}
+  {-# INLINE basicUnsafeCopy #-}
+  {-# INLINE basicUnsafeGrow #-}
+  basicLength          (MOsmIDV v)          = GVM.basicLength v
+  basicUnsafeSlice i n (MOsmIDV v)          = MOsmIDV $ GVM.basicUnsafeSlice i n v
+  basicOverlaps (MOsmIDV v1) (MOsmIDV v2)     = GVM.basicOverlaps v1 v2
+
+  basicUnsafeRead  (MOsmIDV v) i            = OsmID `liftM` GVM.basicUnsafeRead v i
+  basicUnsafeWrite (MOsmIDV v) i (OsmID x)  = GVM.basicUnsafeWrite v i x
+
+  basicClear (MOsmIDV v)                    = GVM.basicClear v
+  basicSet   (MOsmIDV v)         (OsmID x)  = GVM.basicSet v x
+
+  basicUnsafeNew n                        = MOsmIDV `liftM` GVM.basicUnsafeNew n
+  basicUnsafeReplicate n     (OsmID x)    = MOsmIDV `liftM` GVM.basicUnsafeReplicate n x
+  basicUnsafeCopy (MOsmIDV v1) (MOsmIDV v2)   = GVM.basicUnsafeCopy v1 v2
+  basicUnsafeGrow (MOsmIDV v)   n           = MOsmIDV `liftM` GVM.basicUnsafeGrow v n
+
+#if MIN_VERSION_vector(0,11,0)
+  basicInitialize (MOsmIDV v)               = GVM.basicInitialize v
+#endif
+
+instance GV.Vector Vector (OsmID element) where
+  {-# INLINE basicUnsafeFreeze #-}
+  {-# INLINE basicUnsafeThaw #-}
+  {-# INLINE basicLength #-}
+  {-# INLINE basicUnsafeSlice #-}
+  {-# INLINE basicUnsafeIndexM #-}
+  {-# INLINE elemseq #-}
+  basicUnsafeFreeze (MOsmIDV v)         = OsmIDV  `liftM` GV.basicUnsafeFreeze v
+  basicUnsafeThaw (OsmIDV v)            = MOsmIDV `liftM` GV.basicUnsafeThaw v
+  basicLength (OsmIDV v)                = GV.basicLength v
+  basicUnsafeSlice i n (OsmIDV v)       = OsmIDV $ GV.basicUnsafeSlice i n v
+  basicUnsafeIndexM (OsmIDV v) i        = OsmID   `liftM`  GV.basicUnsafeIndexM v i
+
+  basicUnsafeCopy (MOsmIDV mv) (OsmIDV v) = GV.basicUnsafeCopy mv v
+  elemseq _ (OsmID x)                 = GV.elemseq (undefined :: Vector a) x
 
 
 ------------------------- Meta data ---------------------------------
@@ -202,18 +292,18 @@ instance WayLike Way where
 data Member = forall a.  OsmElement a => Member (OsmID a) Text
 
 -- | A relation.
-data Relation = Relation { __relationMembers :: Vector Member
+data Relation = Relation { __relationMembers :: V.Vector Member
                          , __relationTags    :: OsmTags
                          }
 
 
 instance Default Relation where
-  def = Relation empty HM.empty
+  def = Relation V.empty HM.empty
 
 makeLenses ''Relation
 
 -- | Lens to focus on the members of the relation.
-relationMembers :: Lens' Relation (Vector Member)
+relationMembers :: Lens' Relation (V.Vector Member)
 {-# INLINE relationMembers #-}
 relationMembers = _relationMembers
 
