@@ -5,38 +5,40 @@
 {-# LANGUAGE OverloadedStrings          #-}
 {-# LANGUAGE TemplateHaskell            #-}
 {-# LANGUAGE TypeFamilies               #-}
-
+{-# LANGUAGE Rank2Types                 #-}
 
 -- | The basic elements of open street map.
 module Naqsha.OpenStreetMap.Element
        (
 
        -- * Open Street Map elements.
-       -- $osm$
-         OsmID, unsafeToOsmID
-       , Node, Way, Relation, Osm
-       , Member(..)
-       , OsmTags, OsmMeta, unsafeOsmMetaUndefined
-       -- ** Osm elements like types.
-       , OsmElement(..), NodeLike(..), WayLike(..), RelationLike(..)
-         -- ** Useful Lenses.
-       , nodePosition, wayNodeIDs, relationMembers
-       , osmElement, osmMeta
-       -- *** Lenses for meta information.
+         Node, Way, Relation, Member(..)
+       -- ** Sematic elements.
+       , Tagged, OsmTags, OsmTagged(..)
+       , Osm, unsafeOsm, OsmElement(..), unMeta
+       , OsmMeta, OsmID(..), unsafeToOsmID
+       -- ** Useful Lenses.
+       , tagAt, wayNodes, relationMembers
        , osmID, modifiedUser, modifiedUserID, timeStamp, changeSet, version
        , isVisible
+
+       -- *** Lenses for OsmMeta
+       , _osmID, _modifiedUser, _modifiedUserID, _timeStamp, _changeSet, _version
+       , _isVisible
+
+
        ) where
 
-import           Control.Monad               ( liftM )
+import           Control.Monad                  ( liftM )
 import           Control.Lens
 import           Data.Default
-import qualified Data.HashMap.Lazy as HM
-import           Data.Text   hiding (empty)
+import qualified Data.HashMap.Lazy           as HM
+import           Data.Text   hiding             (empty)
 import           Data.Time
 import qualified Data.Vector                 as V
 import qualified Data.Vector.Generic         as GV
 import qualified Data.Vector.Generic.Mutable as GVM
-import           Data.Vector.Unboxed         as UV -- ( MVector(..), Vector, empty, Unbox)
+import           Data.Vector.Unboxed            (Vector, MVector, Unbox)
 
 import           Data.Word
 
@@ -49,28 +51,35 @@ import Naqsha.Position
 -- The Open street map describes the world using three kinds of
 -- elements given by the types `Node`, `Way` and `Relation`
 -- respectively. Intuitively, an element of type `Node` captures a
--- location, a `Way` captures a path. Each of these entities can have
--- additional sematic significance. For example a particular node
--- might be a PoI, or a junction, or a bus stop. Similarly, a way
--- could be a road or a boundary of a region. These semantic meaning
--- is usually given in Open Street Map data base by associating a set
--- of key-value pairs called tags. The type `OsmTags` captures such a mapping.
+-- location, a `Way` captures a path and a `Relation` captures a
+-- combination of other elements, each in a specific _role_.
 --
+-- = Sematics of Elements.
 --
--- = Element Identifiers and Meta information
+-- While the basic nature of an osm element is given by its type,
+-- there are additional semantics that needs to be given to make it
+-- possible to represent an element on the map. For example, a node
+-- could be just an intermediate point in a path or might have a more
+-- significant semantic like being a bus stop on a bus route. A way
+-- might be a road, a boundary for a region or a river. Open streetmap
+-- associates such semantics to an element through a set of tags
+-- captured by the type `OsmTags`. The type @`Tagged` e@ captures
+-- elements of type @e@ glued with a set of tags which fully describe
+-- the semantics of the object.
 --
--- Elements of type e in the data base are uniquely identified via
--- their id's. The type @`OsmID` e@ captures these id's. While the OSM
--- database currently uses 64-bit words as identifiers, the type
--- @`OsmID` e@ should be seen as an opaque type and nothing should be
--- assumed about them other than the fact that they are
--- unique. Parameterising it by the type @e@ given some type safety on
--- the Haskell side and helps in preventing confusion of ids of
--- different types.
+-- = Database meta information
 --
--- Besides the the ID, elements have some open street map specific
--- meta data captured by the type `OsmMeta`.
+-- The Open street map infrastructure also keeps track of some meta
+-- information that helps managing the elements in the database.  One
+-- of the most important information that is kept track of is the
+-- element id, captured by the type `OsmID`. The element id servers as
+-- a unique reference to objects in the data base and is also used
+-- inside elements like `Way` and `Relation`. The meta information
+-- also has other data like object revision number, change set,
+-- etc. which are important if one wants to edit the Open Street Map
+-- database.
 
+------------------------ Element Identifiers ---------------------
 
 -- | The ID of an object in open street map. Currently, the Open
 -- Street map project uses 64-bit word for ids. We use the phantom
@@ -85,7 +94,7 @@ unsafeToOsmID = OsmID
 instance Show (OsmID element) where
   show (OsmID x) = show x
 
-instance UV.Unbox (OsmID element)
+instance Unbox (OsmID element)
 
 newtype instance MVector s (OsmID element) = MOsmIDV  (MVector s Word64)
 newtype instance Vector    (OsmID element) = OsmIDV   (Vector Word64)
@@ -138,10 +147,54 @@ instance GV.Vector Vector (OsmID element) where
   elemseq _ (OsmID x)                 = GV.elemseq (undefined :: Vector a) x
 
 
-------------------------- Meta data ---------------------------------
+------------------------- Semantic Tags ---------------------------------
 
 -- | The tags of an OSM element.
 type OsmTags = HM.HashMap Text Text
+
+-- | A tagged element.
+data Tagged e = Tagged { __element :: e
+                       , __tags    :: OsmTags
+                       }
+
+makeLenses ''Tagged
+
+-- | The default value is with empty tags.
+instance Default e => Default (Tagged e) where
+  def = Tagged def HM.empty
+
+instance Location e => Location (Tagged e) where
+  latitude    tged = latitude    $ tged ^. _element
+  longitude   tged = longitude   $ tged ^. _element
+  geoPosition tged = geoPosition $ tged ^. _element
+
+
+-- | Family of types that have Open street map tags.
+class OsmTagged a where
+
+  -- | The type family that captures the underlying element.
+  type ElementType a :: *
+
+  -- | Lens to focus on the tags
+  tags     :: Lens' a OsmTags
+
+  -- | Lens to focus on the untaged element.
+  untagged :: Lens' a (ElementType a)
+
+-- | The untagged element type is e
+instance OsmTagged (Tagged e) where
+  type ElementType (Tagged e) = e
+  tags     = _tags
+  untagged = _element
+
+---------------- Open street map meta data --------------------
+
+-- | An fully qualified osm element. The type @Osm e@ should be seen
+-- as elements of type @e@ glued with a set of osm tags together with
+-- the meta data for the object in the Open street map database.
+data Osm e = Osm { __osmTaggedElement :: Tagged e
+                 , __osmMeta          :: OsmMeta e
+                 }
 
 -- | The open street map metadata that is associated with each
 -- element.
@@ -155,178 +208,109 @@ data OsmMeta a = OsmMeta { __osmID          :: OsmID a
                          }
 
 makeLenses ''OsmMeta
+makeLenses ''Osm
 
--- |  OsmMeta with all fields set to undefined. Used in parsers.
-unsafeOsmMetaUndefined :: OsmMeta e
-unsafeOsmMetaUndefined = OsmMeta { __osmID          = undefined
-                                 , __modifiedUser   = undefined
-                                 , __modifiedUserID = undefined
-                                 , __isVisible      = undefined
-                                 , __version        = undefined
-                                 , __timeStamp      = undefined
-                                 , __changeSet      = undefined
-                                 }
+-- | The associated untagged element is e.
+instance OsmTagged (Osm e) where
+  type ElementType (Osm e) = e
+  tags     = _osmTaggedElement . _tags
+  untagged = _osmTaggedElement . _element
 
--- | Lens to focus on the osmID.
-osmID :: Lens' (OsmMeta e) (OsmID e)
-{-# INLINE osmID #-}
-osmID = _osmID
+instance Location e => Location (Osm e) where
+  latitude    oe = latitude    $ oe ^. untagged
+  longitude   oe = longitude   $ oe ^. untagged
+  geoPosition oe = geoPosition $ oe ^. untagged
+
+-- | Class that captures elements that behave like a fully for some e
+class OsmTagged a => OsmElement a where
+  meta :: Lens' a (OsmMeta (ElementType a))
+
+instance OsmElement (Osm e) where
+  meta = _osmMeta
+
+
+-- | Only peal of the meta data but get the tagged variant.
+unMeta :: OsmElement a => a -> Tagged  (ElementType a)
+unMeta a = Tagged { __element = a ^. untagged
+                  , __tags    = a ^. tags
+                  }
+
+-- | This is unsafe because each of the meta elements are undefined.
+unsafeOsm :: Default e => Osm e
+unsafeOsm = Osm def OsmMeta { __osmID          = undefined
+                            , __modifiedUser   = undefined
+                            , __modifiedUserID = undefined
+                            , __isVisible      = undefined
+                            , __version        = undefined
+                            , __timeStamp      = undefined
+                            , __changeSet      = undefined
+                            }
+
+
+-------------- Some useful lenses -------------------------------
+
+-- | Lens to focus on the tag at a given key.
+tagAt :: OsmTagged a => Text -> Lens' a (Maybe Text)
+tagAt k = tags . at k
+
+-- | Lens to focus on the Id of the element.
+osmID :: OsmElement a => Lens' a (OsmID (ElementType a))
+osmID = meta . _osmID
 
 -- | Lens to focus on the user who last modified.
-modifiedUser  :: Lens' (OsmMeta e) Text
+modifiedUser  :: OsmElement a => Lens' a Text
 {-# INLINE modifiedUser #-}
-modifiedUser = _modifiedUser
+modifiedUser = meta . _modifiedUser
 
 -- | Lens to focus on the user id of the user that last modified.
-modifiedUserID :: Lens' (OsmMeta e) Integer
-modifiedUserID = _modifiedUserID
+modifiedUserID :: OsmElement a => Lens' a Integer
+modifiedUserID = meta . _modifiedUserID
 
 -- | Flag which indicates whether the associated element is visible or
 -- not.
-isVisible :: Lens' (OsmMeta e) Bool
-isVisible  = _isVisible
+isVisible :: OsmElement a => Lens' a Bool
+isVisible  = meta . _isVisible
 
 
 -- | The version number of the associated entry.
-version :: Lens' (OsmMeta e) Integer
-version =  _version
+version :: OsmElement a => Lens' a Integer
+version =  meta . _version
 
 -- | The time stamp (utc) when the entry was last changed.
-timeStamp :: Lens' (OsmMeta e) UTCTime
-timeStamp = _timeStamp
+timeStamp ::OsmElement a =>  Lens' a UTCTime
+timeStamp = meta . _timeStamp
 
 -- | The change set number where the object was changed.
-changeSet :: Lens' (OsmMeta e) Integer
-changeSet = _changeSet
+changeSet :: OsmElement a => Lens' a Integer
+changeSet = meta . _changeSet
 
------------------------- OsmElement class -----------------------------
+---------- The element of Open street map -----------------
 
--- | A class capturing OSM element type.
-class OsmElement e where
-  -- | The tags for this element.
-  tags       :: Lens' e OsmTags
-
--- | An element tagged with its Osm metadata.
-data Osm e = Osm { __osmElement :: e
-                 , __osmMeta    :: OsmMeta e
-                 }
-
-makeLenses ''Osm
-
--- | Lens to focus on the element.
-osmElement :: Lens' (Osm e) e
-{-# INLINE osmElement #-}
-osmElement = _osmElement
-
--- | Lens to focus on the meta information of an element.
-osmMeta :: Lens' (Osm e) (OsmMeta e)
-{-# INLINE osmMeta #-}
-osmMeta = _osmMeta
-
-instance OsmElement e => OsmElement (Osm e) where
-  tags        = osmElement . tags
-
----------------------------- The node element ----------------------------
-
--- | A node.
-data Node = Node { __nodePosition   :: Geo
-                 , __nodeTags       :: OsmTags
-                 }
+type    Node       = Geo
+type    NodeID     = OsmID Node
+type    WayID      = OsmID Way
+type    RelationID = OsmID Relation
 
 
-makeLenses ''Node
-
--- | Lens to focus on the coordinatis of a node.
-nodePosition :: Lens' Node Geo
-{-# INLINE nodePosition #-}
-nodePosition = _nodePosition
-
-
-instance Default Node where
-  def = Node def HM.empty
-
-instance OsmElement Node where
-  tags        = _nodeTags
-
-instance Location Node where
-  geoPosition = __nodePosition
-  {-# INLINE geoPosition #-}
-
--- | Types that behave are like Node element.
-class Location n => NodeLike n where
-  toNode   :: n    -> Node
-  fromNode :: Node -> n
-
-
-instance NodeLike Node where
-  toNode   = id
-  fromNode = id
-
-instance NodeLike Geo where
-  toNode   g = def & nodePosition .~ g
-  fromNode n = n ^. nodePosition
-
-
--------------------------- The Way element -------------------------------------
-
--- | A way.
-data Way  = Way { __wayNodeIDs :: Vector (OsmID Node)
-                , __wayTags    :: OsmTags
-                }
-
-instance Default Way where
-  def = Way empty HM.empty
-
-
-makeLenses ''Way
-
-
--- | Lens to focus on the node Ids that constitute the way.
-wayNodeIDs :: Lens' Way (Vector (OsmID Node))
-{-# LANGUAGE wayNodeIDs #-}
-wayNodeIDs = _wayNodeIDs
-
-instance OsmElement Way where
-  tags        = _wayTags
-
--- | Types that behave like OSM ways.
-class WayLike w where
-  toWay   :: w   -> Way
-  fromWay :: Way -> w
-
-instance WayLike Way where
-  toWay   = id
-  fromWay = id
-
----------------------- A relation --------------------------------------
+-- | The primitive way type.
+newtype Way  = Way       { __wayNodes        :: Vector NodeID }
 
 -- | A member of a relation.
 
-data Member = NodeM     (OsmID Node)     Text
-            | WayM      (OsmID Way)      Text
-            | RelationM (OsmID Relation) Text
+data Member = NodeM     Text NodeID
+            | WayM      Text WayID
+            | RelationM Text RelationID
 
--- | A relation.
-data Relation = Relation { __relationMembers :: V.Vector Member
-                         , __relationTags    :: OsmTags
-                         }
+-- | The primitive relation type.
+newtype Relation = Relation { __relationMembers :: V.Vector Member }
 
-
-instance Default Relation where
-  def = Relation V.empty HM.empty
-
+makeLenses ''Way
 makeLenses ''Relation
 
--- | Lens to focus on the members of the relation.
-relationMembers :: Lens' Relation (V.Vector Member)
-{-# INLINE relationMembers #-}
+-- | Lens to focus on the node ids in the way.
+wayNodes :: Lens' Way (Vector NodeID)
+wayNodes =  _wayNodes
+
+-- | Lens to focus on the members of a relation.
+relationMembers  :: Lens' Relation (V.Vector Member)
 relationMembers = _relationMembers
-
-
-instance OsmElement Relation where
-  tags        = _relationTags
-
--- | Types that behave like OSM relations.
-class RelationLike r where
-  toRelation    :: r        -> Relation
-  fromRelation  :: Relation -> r

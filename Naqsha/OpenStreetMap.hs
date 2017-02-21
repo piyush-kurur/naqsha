@@ -4,4 +4,5 @@ module Naqsha.OpenStreetMap
       ( module Naqsha.OpenStreetMap.Element
       ) where
 
-import Naqsha.OpenStreetMap.Element hiding (unsafeToOsmID)
+import Naqsha.OpenStreetMap.Element hiding (unsafeToOsmID, OsmID)
+import Naqsha.OpenStreetMap.Element (OsmID)
