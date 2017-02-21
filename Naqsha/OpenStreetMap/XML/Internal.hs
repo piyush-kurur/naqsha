@@ -25,6 +25,9 @@ osmTimeFmt = "%Y-%m-%dT%T%Q%z"
 showT :: Show a => a -> Text
 showT = pack . show
 
+readT :: Read a => Text -> a
+readT = read . unpack
+
 -- | show the time as text
 showTime :: FormatTime t => t -> Text
 showTime = pack . formatTime defaultTimeLocale osmTimeFmt
