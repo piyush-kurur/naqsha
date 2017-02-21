@@ -1,304 +1,169 @@
-{-# LANGUAGE OverloadedStrings    #-}
+{-# LANGUAGE OverloadedStrings          #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE ExistentialQuantification  #-}
 
--- | This module given conduit based streaming interface to generate a
--- XML encodings of the open street map elements. It also provides
--- combinators to build XML file format used for presenting collection
--- of Open Street Map objects. The supported version is 0.6.
+-- | Rendering and streaming of Open Street Map entities as XML files.
 --
--- Schema: https://github.com/oschrenk/osm/blob/master/osm-io/src/main/resources/OSMSchema.xsd
+--
+-- See schema at: https://github.com/oschrenk/osm/blob/master/osm-io/src/main/resources/OSMSchema.xsd
+--
 module Naqsha.OpenStreetMap.XML.Generate
-       ( -- * Root level node creators.
-         osm, osmDoc
-         -- * Streaming Open Street Map elements.
-       , node, way, relation
-       -- ** Streaming with metadata
-       , osmNode, osmWay, osmRelation
-       , withNoTags
-       -- ** Rendering elements
-       , OsmXML(..)
-       , render, encode, pretty
-       -- ** Helper function
-       , xmlDoc
-       , printEvents, prettyPrintEvents
+       ( -- * Open street map XML generation.
+         -- $osmXMLStream$
+         OsmXMLFile
+       , OsmXML(..), eventSource, render, encode, pretty
+       , renderSource, encodeSource, prettySource
+         -- * Streaming types and combinators.
+       , OsmGen, toSource
+       , osmGen, osmDoc
+       , sourceToTagsGen, osmMetaGen
        ) where
 
 
 import           Control.Lens
+import           Control.Monad.Primitive    ( PrimMonad )
+import           Control.Monad.Base         ( MonadBase )
 import           Control.Monad.ST
-import qualified Data.ByteString          as BS
 import           Data.ByteString.Lazy        ( ByteString, fromChunks )
 import           Data.Conduit             as Conduit
 import           Data.Conduit.List        as Conduit
 import           Data.HashMap.Lazy        as HM
+import           Data.Maybe
 import           Data.Monoid
+import           Data.String
+import           Data.Text                   ( Text, pack  )
 import           Data.Version                ( showVersion )
-import           Data.Text                   ( pack )
+import qualified Data.Vector              as V
 import           Data.Vector.Generic      as VG
 import           Data.XML.Types  hiding      ( Node )
 import           Text.XML.Stream.Render
-
+import qualified Paths_naqsha             as NaqshaPaths
 
 import Naqsha.Position
 import Naqsha.OpenStreetMap.Element
 import Naqsha.OpenStreetMap.XML.Internal
 
---------------- OsmFile ------------------------------------------------------
 
-
--- | Generate an stream that corresponds to the osm element. No check
--- is done to ensure that the stream contains only valid osm elements,
--- i.e. nodes, ways and relations. It is the responsibility of the
--- caller to ensure that the body stream only contains valid
--- elements. An easy way to ensure this is to only use the
--- combinators.
-osm :: Monad m
-    => (Latitude, Latitude)    -- ^ latitude range  (min,max)
-    -> (Longitude, Longitude)  -- ^ longitude range (min,max)
-    -> Source m Event          -- ^ The stream of osm elements
-    -> Source m Event
-osm (minLat, maxLat) (minLong, maxLong) bodyStream
-  = tag "osm" ats $ do onlyTag "bounds" boundAttr
-                       bodyStream
-
-  where ats = attr "xmlns" osmNameSpace
-              <> attr "generator" osmGenerator
-              <> attr "version" (pack $ showVersion osmVersion)
-        boundAttr = mconcat [ attr "minlat" $ showT minLat
-                            , attr "maxlat" $ showT maxLat
-                            , attr "minlon" $ showT minLong
-                            , attr "maxlon" $ showT maxLong
-                            ]
--- | Version of `osm` combinator that generates an osm element that is also prefixed by the
--- xml preamble.
-osmDoc :: Monad m
-       => (Latitude, Latitude)    -- ^ latitude range  (min,max)
-       -> (Longitude, Longitude)  -- ^ longitude range (min,max)
-       -> Source m Event          -- ^ The stream of osm elements.
-       -> Source m Event
-osmDoc latR longR = xmlDoc . osm latR longR
-
------------------------- Node ------------------------------------------------
--- | Helper function to create a node.
-nodeP  :: Monad m
-       => Attributes -- ^ The metadata for the
-       -> Geo
-       -> OsmTags
-       -> Source m Event
-nodeP extraAttrs g = tag "node" allAttr . osmTagsToSource
-  where allAttr = attr "lat"    (showT $ latitude g)
-                  <> attr "lon" (showT $ longitude g)
-                  <> extraAttrs
-
--- | Stream a given node as XML events.
-node :: Monad m
-     => Geo
-     -> OsmTags
-     -> Source m Event
-node = nodeP mempty
-
--- | Create node with OSM metadata.
-osmNode :: Monad m
-        => OsmMeta Node -- ^ The metadata for the
-        -> Geo
-        -> OsmTags
-        -> Source m Event
-osmNode = nodeP . osmAttrs
-
--------------------------- Ways ------------------------------------------
-
--- | Helper function to create a way.
-wayP :: Monad m
-     => Attributes
-     -> OsmTags
-     -> Source m (OsmID Node)
-     -> Source m Event
-wayP extraAttrs ots idSrc = tag "way" extraAttrs bodySrc
-  where nRSrc     = forEach idSrc mkND
-        mkND  oid = onlyTag "nd" $ attr "ref" $ showT oid
-        bodySrc   = osmTagsToSource ots <> nRSrc
-
-
--- | Stream a way object as a set of XML events.
-way :: Monad m
-    => OsmTags                -- ^ The tags associated with the way
-    -> Source m (OsmID Node)  -- ^ The source for node ids in the way.
-    -> Source m Event
-way = wayP mempty
-
-
--- | Version of `node` with and associated OSM metadata.
-osmWay :: Monad m
-       => OsmMeta Way           -- ^ The metadata for the
-       -> OsmTags               -- ^ The tags associated with the way.
-       -> Source m (OsmID Node)
-       -> Source m Event
-osmWay = wayP . osmAttrs
-
----------------------------------- Relation ----------------------------------
-
--- | Helper function to create a relation.
-relationP :: Monad m
-          => Attributes
-          -> OsmTags
-          -> Source m Member
-          -> Source m Event
-relationP attrs ots mSrc  = tag "relation" attrs bodySrc
-  where memSrc  = forEach mSrc osmMember
-        bodySrc = osmTagsToSource ots <> memSrc
-
--- | Stream a relation with a given set of tags.
-relation :: Monad m
-         => OsmTags                -- ^ The tags of this relation
-         -> Source m Member        -- ^ The stream of members of this relation.
-         -> Source m Event
-relation = relationP mempty
-
--- | Variant of `relation` that adds an OSM meta data.
-osmRelation :: Monad m
-            => OsmMeta Relation       -- ^ The OSM meta data of this relation.
-            -> OsmTags                -- ^ The tags of this relation
-            -> Source m Member        -- ^ The stream of members of this relation.
-            -> Source m Event
-osmRelation = relationP . osmAttrs
-
--- | Stream a member element
-osmMember :: Monad m
-          => Member
-          -> Source m Event
-osmMember mem = onlyTag "member" attrs
-  where attrs = case mem of
-                  NodeM     oid rl -> refA oid <> roleA rl <> typeA "node"
-                  WayM      oid rl -> refA oid <> roleA rl <> typeA "way"
-                  RelationM oid rl -> refA oid <> roleA rl <> typeA "relation"
-        refA  :: OsmID e -> Attributes
-        refA  = attr "ref" . showT
-        typeA = attr "type"
-        roleA = attr "role"
-
-------------------------- Helper function ----------------------
-
--- | Combinator to stream an OSM element with no tags. For example,
+-- $osmXMLStream$
 --
--- > streamDefaultNode        = withNoTags $ node def
--- > streamDefaultOsmNode mta = withNoTags $ osmNode mta def
+-- One of the earliest formats supported by Open Street Map is its
+-- XML. This module gives functions to render Open Street Map
+-- elements. It also provides combinators for building xml event
+-- streams.
+--
+-- = Basics.
+--
+-- The type `OsmGen` captures a generator for a single XML element
+-- stream. One can use the combinator `toSource` to convert such a
+-- generator into a stream of XML events. An element of type `OsmGen`
+-- can be converted into the corresponding xml document using the
+-- `osmDoc` combinator.
+--
+-- Types like `Node`, `Way`, `Relation` and their `Tagged` variants
+-- are instances of the type class `OsmXML` and can be converted into
+-- a generator using the member function `osmXMLGen`. One can also
+-- convert them to streams directly using the combinator `eventStream`
+-- The type `OsmXMLFile` captures a full xml file and is also an
+-- instance of OsmXML.
+--
+-- The combinators `render`, `encode` and `pretty` can convert an
+-- instance of `OsmXML` into ByteString. The combinator `encode` is
+-- efficient where as `pretty` creates a pretty printed version.
+--
+-- = Low level streaming interface
+--
+-- Xml files that occur in the context of open street map can be quite
+-- huge. Hence it is advisable to generate them using the low level
+-- streaming interface that we provide.
+--
+-- The starting point is to build streams of single elements using the
+-- `OsmGen` type. One can build complicated types by converting these
+-- element generators into event streams and including it in the body
+-- of other generators.
+--
+-- An `OsmGen` consists of
+--
+-- 1. An element name
+-- 2. A set of attributes
+-- 3. A body of xml elements.
+--
+-- Note that a `OsmGen` type only generates a single element. It is a
+-- monoid which appends the attribute list and body separately and
+-- picks the first name as its tag name. The standard idiom for
+-- building a generator is as follows
+--
+-- > {-# LANGUAGE OverloadedStrings #-}
 -- >
--- > streamDefaultWay = withNoTags way $ do yield (fromInt 1)
---
-withNoTags :: (OsmTags -> a) -> a
-withNoTags = ($ HM.empty)
-
-
--- | This combinator wraps the xml stream that corresponds to the root
--- element and wraps a xml preamble around it. No checks are done to
--- ensure that the source consists of a single root element, it is the
--- responsibility of the user to do so.
-xmlDoc :: Monad m
-       => Source m Event   -- ^ The stream corresponding to the root
-                           -- element.
-       -> Source m Event
-xmlDoc rootSrc = yield EventBeginDocument <> rootSrc <> yield EventEndDocument
-
-
--- | Print a set of xml `Event` using the given render settings.
-printEvents :: RenderSettings
-            -> Source IO Event
-            -> IO ()
-printEvents rConf src = runConduit $ src =$= renderBytes rConf =$= Conduit.mapM_ BS.putStr
-
--- | Pretty print a set of xml `Events`
-prettyPrintEvents ::Source IO Event
-                  -> IO ()
-prettyPrintEvents = printEvents $ def { rsPretty = True }
-
--- | Convert tags to a source of XML events.
-osmTagsToSource :: Monad m => OsmTags -> Source m Event
-osmTagsToSource = HM.foldrWithKey kvSource mempty
-    where kvSource k v = mappend $ onlyTag "tag" $ attr "k" k <> attr "v" v
-
-osmAttrs :: OsmMeta e -> Attributes
-osmAttrs om = mconcat [ attr "id"        $ showT $ om    ^. osmID
-                      , attr "user"      $ showT $ om    ^. modifiedUser
-                      , attr "uid"       $ showT $ om    ^. modifiedUserID
-                      , attr "timestamp" $ showTime $ om ^. timeStamp
-                      , attr "version"   $ showT  $ om   ^. version
-                      , attr "changeset" $ showT  $ om   ^. changeSet
-                      ]
-              <> attr "visible" (if om ^. isVisible then "true" else "false")
-
-
-forEach :: Monad m
-        => Source m i
-        -> (i -> Source m o)
-        -> Source m o
-forEach inpSrc srcFunc = inpSrc =$= bodyConduit
-  where bodyConduit = awaitForever (toProducer . srcFunc)
-
--- | Tag with no body
-onlyTag :: Monad m
-        => Name
-        -> Attributes
-        -> Source m Event
-onlyTag n attrs = tag n attrs mempty
-
------------------------------- Stuff that can be converted to osm XML entries -------
-
--- | Osm types that have an xml representation. Minimum complete
--- implementation is either one of `toXMLSource` or `toXMLSourceAttrs`.
--- The default definitions of these members against each other is given as follows
---
+-- > genFoo :: Monad m => Source m Event -> OsmGen m
+-- > genFoo body = "foo" <> attributeGen "a" "afoo" <> attributeGen "b" "bfoo" <> bodyGen body
 -- >
--- > toXMLSource        = toXMLSourceAttrs mempty
--- > toXMLSourceAttrs _ = toXMLSource
--- >
+-- > myFoo :: OsmGen Identity
+-- > myFoo = genFoo (toSource genFoo empty)
+-- >      -- will generate <foo a="afoo" b=bfoo"><foo a="afoo" b="bfoo"/></foo>
 --
--- For elements which do not take any additional attributes, it is
--- often easier to just define the member `toXMLSource`.
+-- Notice the use of `toSource` above to convert the inner foo to a source of events.
 --
-class OsmXML e where
+--
 
-  -- | Convert the ement to a source of events.
-  toXMLSource      :: Monad m
-                   => e              -- ^ the element to convert
-                   -> Source m Event
+-- | A generator for OSM elements.
+newtype OsmGen m =  OsmGen (First Name, Attributes, Source m Event) deriving Monoid
 
-  -- | Convert the element to a source of events together with
-  -- additional attributes.
-  toXMLSourceAttrs :: Monad m
-                   => Attributes     -- ^ the additional attributes to add
-                   -> e              -- ^ the element to convert.
-                   -> Source m Event
+instance Monad m => IsString (OsmGen m) where
+  fromString = nameGen . fromString
 
-  -- | Default is to create XML source with empty additional
-  -- attributes.
-  toXMLSource        = toXMLSourceAttrs mempty
-
-  -- | Default action is to ignore the attributes.
-  toXMLSourceAttrs _ = toXMLSource
-
-instance OsmXML e => OsmXML (Osm e) where
-  toXMLSource oe = toXMLSourceAttrs (osmAttrs $ oe ^. osmMeta) $ oe ^. osmElement
-
-instance OsmXML Node where
-  toXMLSourceAttrs attrs n = nodeP attrs (n ^. nodePosition) (n ^. tags)
+-- | Convert the generator to a source of xml events. This results in
+-- an error if the node name is not set.
+toSource :: Monad m => OsmGen m -> Source m Event
+toSource (OsmGen (nm, ats, bd)) = tag t ats bd
+  where t = fromMaybe (error "OpenStreetMap XML Gen toSource: empty name") $ getFirst nm
 
 
-instance OsmXML Way where
-  toXMLSourceAttrs attrs w = wayP attrs (w ^. tags) $ vectorToSrc $ w ^. wayNodeIDs
 
-instance OsmXML Relation where
-  toXMLSourceAttrs attrs r = relationP attrs (r ^. tags) $ vectorToSrc $ r ^. relationMembers
 
-vectorToSrc :: (Vector v a, Monad m) => v a -> Source m a
-vectorToSrc v = Conduit.enumFromTo 0 (VG.length v - 1) =$= Conduit.mapM (unsafeIndexM v)
+-------------------------- Stuff that can be converted to osm elements -------------
+
+
+-- | Types that can be streamed in an OSM XML stream.
+class OsmXML a where
+  -- | Given the Osm generator for this element.
+  osmXMLGen :: Monad m => a -> OsmGen m
+
+-- | Generate an xml event source out of an instance of OsmXML.
+eventSource :: (Monad m, OsmXML a) => a -> Source m Event
+eventSource = toSource . osmXMLGen
+
+-- | Render a given source into lazy byte string.
+renderSource :: ( PrimMonad base
+                , MonadBase base m
+                )
+             => RenderSettings
+             -> Source m Event
+             -> m ByteString
+renderSource rSetting src = fromChunks <$> sourceToList (src =$= renderBytes rSetting)
+
+-- | Encode the given source of events.
+encodeSource :: ( PrimMonad base
+                , MonadBase base m
+                )
+             => Source m Event
+             -> m ByteString
+encodeSource = renderSource def
+
+-- | Pretty print the given source of events.
+prettySource :: ( PrimMonad base
+                , MonadBase base m
+                )
+             => Source m Event
+             -> m ByteString
+prettySource = renderSource $ def { rsPretty = True }
 
 -- | Render an element as a lazy byte string (utf-8 encoding) given a settings.
 render :: OsmXML e
        => RenderSettings      -- ^ setting used to render
        -> e                   -- ^ element to render
        -> ByteString
-render rSetting e = fromChunks $ runST $ sourceToList byteSrc
-  where byteSrc :: Source (ST s) BS.ByteString
-        byteSrc = toXMLSource e =$= renderBytes rSetting
+render rSetting e = runST $ renderSource rSetting $ eventSource e
+
 -- | Render the element efficiently i.e. with out wasting spaces.
 encode ::  OsmXML e => e -> ByteString
 encode = render def
@@ -306,3 +171,153 @@ encode = render def
 -- | Pretty print a given osm element.
 pretty :: OsmXML e => e -> ByteString
 pretty = render $ def { rsPretty = True }
+
+
+------------------------- Osm xml file -------------------------------
+
+-- | Data type that captures an osm xml file.
+data OsmXMLFile = OsmXMLFile GeoBounds (V.Vector SomeElement)
+
+-- | Entries of an OsmXML file.
+data SomeElement = forall e . OsmXML e => SomeElement e
+
+instance OsmXML SomeElement where
+  osmXMLGen (SomeElement e) = osmXMLGen e
+
+instance OsmXML OsmXMLFile where
+  osmXMLGen (OsmXMLFile gb vSrc)  = osmGen gb bdy
+    where bdy = forEach (vectorToSrc vSrc) eventSource
+
+---------------- Some Helper generators -------------------------------
+
+-- | Generate an osm element given its bounds and body.
+osmGen :: Monad m
+       => GeoBounds               -- ^ The geographical bounds
+       -> Source m Event          -- ^ The body of the osmGen element
+       -> OsmGen m
+osmGen gbounds bdSrc
+  = "osm" <> osmVersionGen <> osmXmlnsGen <> osmGeneratorGen <> bodyGen bdy
+  where bdy = eventSource gbounds <> bdSrc
+
+
+-- | Generate a complete osm document with the given Osm element as the content.
+osmDoc :: (Monad m, OsmXML a)
+       => a              -- The root entity
+       -> Source m Event
+osmDoc osg = yield EventBeginDocument <> eventSource osg <> yield EventEndDocument
+
+
+
+-------------------------- Basic instances of OsmXML ------------------------------
+
+instance OsmXML Geo where
+  osmXMLGen loc = "node"
+               <> attributeGen "lat" (showT $ latitude  loc)
+               <> attributeGen "lon" (showT $ longitude loc)
+
+
+instance OsmXML GeoBounds where
+  osmXMLGen gb = "bounds" <> mconcat
+                 [ attributeGen "minlat" $ showT $ latitude  $ minGeo gb
+                 , attributeGen "maxlat" $ showT $ latitude  $ maxGeo gb
+                 , attributeGen "minlon" $ showT $ longitude $ minGeo gb
+                 , attributeGen "maxlon" $ showT $ longitude $ maxGeo gb
+                 ]
+
+instance OsmXML Member where
+  osmXMLGen mem = case mem of
+                    NodeM     rl oid -> mGen "node" oid rl
+                    WayM      rl oid -> mGen "way"  oid rl
+                    RelationM rl oid -> mGen "relation" oid rl
+    where mGen ty oid rl = "member" <> mconcat [ attributeGen "ref"  $ showT oid
+                                               , attributeGen "role" rl
+                                               , attributeGen "type" ty
+                                               ]
+
+instance OsmXML Way where
+  osmXMLGen w = "way" <> bodyGen bdy
+    where bdy       = forEach nodeIdSrc ndTag
+          nodeIdSrc = vectorToSrc (w ^. wayNodes)
+          ndTag oid = toSource $ "nd" <> attributeGen "ref" (showT oid)
+
+instance OsmXML Relation where
+  osmXMLGen rel = "relation" <> bodyGen mems
+    where mems   = forEach memSrc eventSource
+          memSrc = vectorToSrc (rel ^. relationMembers)
+
+
+instance OsmXML e => OsmXML (Tagged e) where
+  osmXMLGen te = osmXMLGen (te  ^. untagged) <> bodyGen tgs
+    where tgs          = HM.foldrWithKey tgFunc mempty (te ^. tags)
+          tgFunc k v   = mappend $ tagSource k v
+
+instance OsmXML e => OsmXML (Osm e) where
+  osmXMLGen oe = osmXMLGen (unMeta oe) <> osmMetaGen (oe ^. meta)
+
+
+-- | Given a source of tags, i.e. a source of key value pairs, create
+-- a generator out of it.
+sourceToTagsGen :: Monad m => Source m (Text, Text) -> OsmGen m
+sourceToTagsGen src = bodyGen $ src =$= tgConduit
+  where tgConduit   = awaitForever $ toProducer . uncurry tagSource
+
+
+-- | Add osm meta information to the given generator.
+osmMetaGen :: Monad m
+           => OsmMeta e
+           -> OsmGen m
+osmMetaGen mt = mconcat [ attributeGen "id"        $ showT    $ mt ^. _osmID
+                        , attributeGen "user"      $ showT    $ mt ^. _modifiedUser
+                        , attributeGen "uid"       $ showT    $ mt ^. _modifiedUserID
+                        , attributeGen "timestamp" $ showTime $ mt ^. _timeStamp
+                        , attributeGen "version"   $ showT    $ mt ^. _version
+                        , attributeGen "changeset" $ showT    $ mt ^. _changeSet
+                        , attributeGen "visible"   $ if         mt ^. _isVisible
+                                                     then "true"
+                                                     else "false"
+                        ]
+
+
+
+----------------------- Helper generators -------------------------------------------
+
+-- | Osm namespace attribute
+osmXmlnsGen :: Monad m => OsmGen m
+osmXmlnsGen = attributeGen "xmlns" osmNameSpace
+
+osmVersionGen :: Monad m => OsmGen m
+osmVersionGen = attributeGen "version" (pack $ showVersion osmVersion)
+
+osmGeneratorGen :: Monad m => OsmGen m
+osmGeneratorGen = attributeGen "generator" $ "naqsha-" <> pack (showVersion NaqshaPaths.version)
+
+
+-- | Generator with a given tag name
+nameGen :: Monad m => Name -> OsmGen m
+nameGen n = OsmGen (First $ Just n, mempty, mempty)
+
+-- | Generator with a given body.
+bodyGen     :: Source m Event -> OsmGen m
+bodyGen src = OsmGen (mempty, mempty, src)
+
+-- | Convert a tag, i.e. kv pair into a source.
+tagSource :: Monad m => Text -> Text -> Source m Event
+tagSource k v = toSource $ "tag" <> attributeGen "k" k <> attributeGen "v" v
+
+
+---------------------- Attribute generators -------------------------------
+
+-- | Generator with a given attributes.
+attributeGen :: Monad m => Name -> Text -> OsmGen m
+attributeGen a v = OsmGen (mempty, attr a v, mempty)
+
+--------------------- Some source elements ------------------------
+vectorToSrc :: (VG.Vector v a, Monad m) => v a -> Source m a
+vectorToSrc v = Conduit.enumFromTo 0 (VG.length v - 1) =$= Conduit.mapM (unsafeIndexM v)
+
+forEach :: Monad m
+        => Source m i
+        -> (i -> Source m o)
+        -> Source m o
+forEach inpSrc srcFunc = inpSrc =$= bodyConduit
+  where bodyConduit = awaitForever (toProducer . srcFunc)
