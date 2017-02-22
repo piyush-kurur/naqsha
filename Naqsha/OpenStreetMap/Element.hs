@@ -15,7 +15,7 @@ module Naqsha.OpenStreetMap.Element
          Node, Way, Relation, Member(..)
        -- ** Sematic elements.
        , Tagged, OsmTags, OsmTagged(..)
-       , Osm, unsafeOsm, OsmElement(..), unMeta
+       , Osm, OsmElement(..), unMeta
        , OsmMeta, OsmID(..), unsafeToOsmID
        -- ** Useful Lenses.
        , tagAt, wayNodes, relationMembers
@@ -198,17 +198,31 @@ data Osm e = Osm { __osmTaggedElement :: Tagged e
 
 -- | The open street map metadata that is associated with each
 -- element.
-data OsmMeta a = OsmMeta { __osmID          :: OsmID a
-                         , __modifiedUser   :: Text
-                         , __modifiedUserID :: Integer
-                         , __isVisible      :: Bool
-                         , __version        :: Integer
-                         , __timeStamp      :: UTCTime
-                         , __changeSet      :: Integer
+data OsmMeta a = OsmMeta { __osmID          :: Maybe (OsmID a)
+                         , __modifiedUser   :: Maybe Text
+                         , __modifiedUserID :: Maybe Integer
+                         , __isVisible      :: Maybe Bool
+                         , __version        :: Maybe Integer
+                         , __timeStamp      :: Maybe UTCTime
+                         , __changeSet      :: Maybe Integer
                          }
 
 makeLenses ''OsmMeta
 makeLenses ''Osm
+
+instance Default (OsmMeta a) where
+  def = OsmMeta { __osmID          = Nothing
+                , __modifiedUser   = Nothing
+                , __modifiedUserID = Nothing
+                , __isVisible      = Nothing
+                , __version        = Nothing
+                , __timeStamp      = Nothing
+                , __changeSet      = Nothing
+                }
+
+
+instance Default e => Default (Osm e) where
+  def = Osm def def
 
 -- | The associated untagged element is e.
 instance OsmTagged (Osm e) where
@@ -235,18 +249,6 @@ unMeta a = Tagged { __element = a ^. untagged
                   , __tags    = a ^. tags
                   }
 
--- | This is unsafe because each of the meta elements are undefined.
-unsafeOsm :: Default e => Osm e
-unsafeOsm = Osm def OsmMeta { __osmID          = undefined
-                            , __modifiedUser   = undefined
-                            , __modifiedUserID = undefined
-                            , __isVisible      = undefined
-                            , __version        = undefined
-                            , __timeStamp      = undefined
-                            , __changeSet      = undefined
-                            }
-
-
 -------------- Some useful lenses -------------------------------
 
 -- | Lens to focus on the tag at a given key.
@@ -254,34 +256,34 @@ tagAt :: OsmTagged a => Text -> Lens' a (Maybe Text)
 tagAt k = tags . at k
 
 -- | Lens to focus on the Id of the element.
-osmID :: OsmElement a => Lens' a (OsmID (ElementType a))
+osmID :: OsmElement a => Lens' a (Maybe (OsmID (ElementType a)))
 osmID = meta . _osmID
 
 -- | Lens to focus on the user who last modified.
-modifiedUser  :: OsmElement a => Lens' a Text
+modifiedUser  :: OsmElement a => Lens' a (Maybe Text)
 {-# INLINE modifiedUser #-}
 modifiedUser = meta . _modifiedUser
 
 -- | Lens to focus on the user id of the user that last modified.
-modifiedUserID :: OsmElement a => Lens' a Integer
+modifiedUserID :: OsmElement a => Lens' a (Maybe Integer)
 modifiedUserID = meta . _modifiedUserID
 
 -- | Flag which indicates whether the associated element is visible or
 -- not.
-isVisible :: OsmElement a => Lens' a Bool
+isVisible :: OsmElement a => Lens' a (Maybe Bool)
 isVisible  = meta . _isVisible
 
 
 -- | The version number of the associated entry.
-version :: OsmElement a => Lens' a Integer
+version :: OsmElement a => Lens' a (Maybe Integer)
 version =  meta . _version
 
 -- | The time stamp (utc) when the entry was last changed.
-timeStamp ::OsmElement a =>  Lens' a UTCTime
+timeStamp ::OsmElement a =>  Lens' a (Maybe UTCTime)
 timeStamp = meta . _timeStamp
 
 -- | The change set number where the object was changed.
-changeSet :: OsmElement a => Lens' a Integer
+changeSet :: OsmElement a => Lens' a (Maybe Integer)
 changeSet = meta . _changeSet
 
 ---------- The element of Open street map -----------------

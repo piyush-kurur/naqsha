@@ -1,6 +1,7 @@
 {-# LANGUAGE OverloadedStrings          #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE ExistentialQuantification  #-}
+{-# LANGUAGE Rank2Types                 #-}
 
 -- | Rendering and streaming of Open Street Map entities as XML files.
 --
@@ -266,18 +267,20 @@ sourceToTagsGen src = bodyGen $ src =$= tgConduit
 osmMetaGen :: Monad m
            => OsmMeta e
            -> OsmGen m
-osmMetaGen mt = mconcat [ attributeGen "id"        $ showT    $ mt ^. _osmID
-                        , attributeGen "user"      $ showT    $ mt ^. _modifiedUser
-                        , attributeGen "uid"       $ showT    $ mt ^. _modifiedUserID
-                        , attributeGen "timestamp" $ showTime $ mt ^. _timeStamp
-                        , attributeGen "version"   $ showT    $ mt ^. _version
-                        , attributeGen "changeset" $ showT    $ mt ^. _changeSet
-                        , attributeGen "visible"   $ if         mt ^. _isVisible
-                                                     then "true"
-                                                     else "false"
+osmMetaGen mt = mconcat [ maybeAttr mt _osmID          $ attributeGen "id"        . showT
+                        , maybeAttr mt _modifiedUser   $ attributeGen "user"
+                        , maybeAttr mt _modifiedUserID $ attributeGen "uid"       . showT
+                        , maybeAttr mt _timeStamp      $ attributeGen "timestamp" . showTime
+                        , maybeAttr mt _version        $ attributeGen "version"   . showT
+                        , maybeAttr mt _changeSet      $ attributeGen "changeset" . showT
+                        , maybeAttr mt _isVisible      $ visibleFunc
                         ]
 
-
+  where maybeAttr :: Monad m => a -> Lens' a (Maybe b) -> (b -> OsmGen m) -> OsmGen m
+        maybeAttr a lns gen = maybe mempty gen $ a ^. lns
+        visibleFunc cond
+          | cond          = attributeGen "visible" "true"
+          | otherwise     = attributeGen "visible" "false"
 
 ----------------------- Helper generators -------------------------------------------
 
