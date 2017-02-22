@@ -11,12 +11,12 @@
 module Naqsha.OpenStreetMap.XML.Generate
        ( -- * Open street map XML generation.
          -- $osmXMLStream$
-         OsmXMLFile
+         OsmXMLFile(..), SomeElement(..)
        , OsmXML(..), eventSource, render, encode, pretty
        , renderSource, encodeSource, prettySource
          -- * Streaming types and combinators.
        , OsmGen, toSource
-       , osmGen, osmDoc
+       , osmWrap, wrapDoc, wrapGenDoc
        , sourceToTagsGen, osmMetaGen
        ) where
 
@@ -186,26 +186,33 @@ instance OsmXML SomeElement where
   osmXMLGen (SomeElement e) = osmXMLGen e
 
 instance OsmXML OsmXMLFile where
-  osmXMLGen (OsmXMLFile gb vSrc)  = osmGen gb bdy
+  osmXMLGen (OsmXMLFile gb vSrc)  = osmWrap gb bdy
     where bdy = forEach (vectorToSrc vSrc) eventSource
 
 ---------------- Some Helper generators -------------------------------
 
--- | Generate an osm element given its bounds and body.
-osmGen :: Monad m
-       => GeoBounds               -- ^ The geographical bounds
-       -> Source m Event          -- ^ The body of the osmGen element
-       -> OsmGen m
-osmGen gbounds bdSrc
+-- | Wrap a given source of events into a <osm></osm> tag.
+osmWrap :: Monad m
+        => GeoBounds               -- ^ The geographical bounds
+        -> Source m Event          -- ^ The body of the osmGen element
+        -> OsmGen m
+osmWrap gbounds bdSrc
   = "osm" <> osmVersionGen <> osmXmlnsGen <> osmGeneratorGen <> bodyGen bdy
   where bdy = eventSource gbounds <> bdSrc
 
 
 -- | Generate a complete osm document with the given Osm element as the content.
-osmDoc :: (Monad m, OsmXML a)
-       => a              -- The root entity
-       -> Source m Event
-osmDoc osg = yield EventBeginDocument <> eventSource osg <> yield EventEndDocument
+wrapDoc :: (Monad m, OsmXML a)
+        => a                    -- The root entity
+        -> Source m Event
+wrapDoc = wrapGenDoc . osmXMLGen
+
+
+-- | Wrap a root level generator into a osm document.
+wrapGenDoc :: Monad m
+           => OsmGen m            -- Generator for
+           -> Source m Event
+wrapGenDoc gen = yield EventBeginDocument <> toSource gen <> yield EventEndDocument
 
 
 
