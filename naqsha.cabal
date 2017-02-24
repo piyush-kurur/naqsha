@@ -29,6 +29,7 @@ library
   build-depends: base            >= 4.6  && < 4.10
                , bytestring
                , conduit
+               , conduit-combinators
                , containers
                , data-default
                , exceptions
