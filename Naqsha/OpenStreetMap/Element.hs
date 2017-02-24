@@ -17,6 +17,7 @@ module Naqsha.OpenStreetMap.Element
        , Tagged, OsmTags, OsmTagged(..)
        , Osm, OsmElement(..), unMeta
        , OsmMeta, OsmID(..), unsafeToOsmID
+       , NodeID, WayID, RelationID
        -- ** Useful Lenses.
        , tagAt, wayNodes, relationMembers
        , osmID, modifiedUser, modifiedUserID, timeStamp, changeSet, version
@@ -289,8 +290,14 @@ changeSet = meta . _changeSet
 ---------- The element of Open street map -----------------
 
 type    Node       = Geo
+
+-- | ID of Nodes
 type    NodeID     = OsmID Node
+
+-- | ID of Ways
 type    WayID      = OsmID Way
+
+-- | ID of Relations
 type    RelationID = OsmID Relation
 
 
