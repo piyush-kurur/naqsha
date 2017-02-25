@@ -2,9 +2,11 @@
 -- | XML Internal module.
 module Naqsha.OpenStreetMap.XML.Internal where
 
-import           Data.Version                ( Version(..) )
-import           Data.Time
+import           Data.Monoid
 import           Data.Text                   ( Text, pack, unpack )
+import           Data.Time
+import           Data.Version                ( Version(..) )
+import qualified Paths_naqsha             as NaqshaPaths
 
 -- | The namespace in which the given Open Street Map elements reside.
 osmNameSpace :: Text
@@ -14,8 +16,9 @@ osmNameSpace = "http://openstreetmap.org/osm/0.6"
 osmVersion :: Version
 osmVersion = Version [0,6] []
 
+-- | The generator text for naqsha library.
 osmGenerator :: Text
-osmGenerator = "CGImap 0.0.2"
+osmGenerator = "naqsha-" <> showVersion NaqshaPaths.version
 
 -- | Time format used by osm.
 osmTimeFmt :: String
@@ -35,3 +38,6 @@ showTime = pack . formatTime defaultTimeLocale osmTimeFmt
 -- | read teh time as text
 timeParser :: (Monad m, ParseTime t) => Text -> m t
 timeParser = parseTimeM True defaultTimeLocale osmTimeFmt . unpack
+
+showVersionT :: Version -> Text
+showVersionT = pack . showVersion
