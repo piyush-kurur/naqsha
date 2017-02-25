@@ -26,7 +26,8 @@ module Naqsha.OpenStreetMap.Element
        -- *** Lenses for OsmMeta
        , _osmID, _modifiedUser, _modifiedUserID, _timeStamp, _changeSet, _version
        , _isVisible
-
+       -- * Event type
+       , OsmEvent(..)
 
        ) where
 
@@ -323,3 +324,15 @@ wayNodes =  _wayNodes
 -- | Lens to focus on the members of a relation.
 relationMembers  :: Lens' Relation (V.Vector Member)
 relationMembers = _relationMembers
+
+-- | Open streetmap event types. This can be used to stream osm elements.
+data OsmEvent = EventBeginOsm
+              | EventEndOsm
+              | EventOsmGeoBound  !GeoBounds
+              | EventOsmNodeBegin !Geo !OsmMeta
+              | EventOsmNodeEnd
+              | EventOsmWayBegin      !OsmMeta
+              | EventOsmWayEnd
+              | EventOsmRelationBegin !OsmMeta
+              | EventOsmRelationEnd
+              | EventOsmTag           !(Text,Text)
