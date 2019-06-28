@@ -40,6 +40,9 @@ common defaults
                , bytestring             >= 0.10 &&  < 0.11
                , groups
                , vector                 >= 0.12 &&  < 0.13
+  default-language: Haskell2010
+
+---------------------- Components --------------------------------------
 
 library geospatial
   import: defaults
@@ -54,7 +57,8 @@ library geospatial
                , Naqsha.Geometry.Angle
                , Naqsha.Geometry.Coordinate
 
-  default-language: Haskell2010
+
+--------------------------------- Test suits ---------------------------
 
 test-Suite test
   import: defaults
