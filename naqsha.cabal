@@ -57,6 +57,11 @@ library geospatial
                , Naqsha.Geometry.Angle
                , Naqsha.Geometry.Coordinate
 
+library openstreetmap
+  import: defaults
+  hs-source-dirs: openstreetmap
+  exposed-modules: Naqsha.OpenStreetMap.ID
+
 
 --------------------------------- Test suits ---------------------------
 
